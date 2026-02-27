@@ -1,0 +1,686 @@
+<!doctype html>
+<html lang="en" class="h-full">
+ <head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ESP32 Water Quality Monitor</title>
+  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+  <script src="/_sdk/element_sdk.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet">
+  <style>
+    * { font-family: 'Outfit', sans-serif; }
+    
+    .gauge-ring {
+      stroke-dasharray: 283;
+      stroke-dashoffset: 283;
+      transition: stroke-dashoffset 1s ease-out;
+    }
+    
+    .card-glow {
+      box-shadow: 0 0 40px rgba(59, 130, 246, 0.1);
+    }
+    
+    .pulse-dot {
+      animation: pulse 2s infinite;
+    }
+    
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.5; transform: scale(1.2); }
+    }
+    
+    .bar-animate {
+      animation: barGrow 1s ease-out forwards;
+    }
+    
+    @keyframes barGrow {
+      from { transform: scaleX(0); }
+      to { transform: scaleX(1); }
+    }
+    
+    .fade-in {
+      animation: fadeIn 0.5s ease-out forwards;
+    }
+    
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    
+    .chart-line {
+      stroke-dasharray: 1000;
+      stroke-dashoffset: 1000;
+      animation: drawLine 2s ease-out forwards;
+    }
+    
+    @keyframes drawLine {
+      to { stroke-dashoffset: 0; }
+    }
+    
+    ::-webkit-scrollbar { width: 8px; }
+    ::-webkit-scrollbar-track { background: #1e293b; }
+    ::-webkit-scrollbar-thumb { background: #3b82f6; border-radius: 4px; }
+  </style>
+  <style>body { box-sizing: border-box; }</style>
+  <script src="/_sdk/data_sdk.js" type="text/javascript"></script>
+ </head>
+ <body class="h-full bg-slate-900 text-white overflow-auto">
+  <div id="app" class="w-full min-h-full bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900"><!-- Header -->
+   <header class="bg-slate-800/50 backdrop-blur-lg border-b border-slate-700/50 sticky top-0 z-10">
+    <div class="max-w-7xl mx-auto px-4 py-4">
+     <div class="flex items-center justify-between">
+      <div class="flex items-center gap-3">
+       <div class="w-10 h-10 bg-gradient-to-br from-blue-500 to-cyan-400 rounded-xl flex items-center justify-center">
+        <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
+        </svg>
+       </div>
+       <div>
+        <h1 id="dashboard-title" class="text-xl font-bold bg-gradient-to-r from-blue-400 to-cyan-300 bg-clip-text text-transparent">Water Quality Monitor</h1>
+        <p id="location-name" class="text-slate-400 text-sm">Main Water Tank</p>
+       </div>
+      </div>
+      <div class="flex items-center gap-4">
+       <div class="flex items-center gap-2 bg-slate-700/50 px-3 py-2 rounded-lg">
+        <div class="pulse-dot w-2 h-2 bg-green-400 rounded-full"></div><span class="text-sm text-slate-300">ESP32 Connected</span>
+       </div><button onclick="refreshData()" class="bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+        </svg> Refresh </button>
+      </div>
+     </div>
+    </div>
+   </header>
+   <main class="max-w-7xl mx-auto px-4 py-6 space-y-6"><!-- Overall Quality Score -->
+    <div class="bg-slate-800/50 rounded-2xl p-6 card-glow border border-slate-700/50 fade-in">
+     <div class="flex flex-col lg:flex-row items-center gap-8">
+      <div class="relative">
+       <svg class="w-48 h-48 transform -rotate-90"><circle cx="96" cy="96" r="85" fill="none" stroke="#1e293b" stroke-width="12" /> <circle id="quality-gauge" cx="96" cy="96" r="85" fill="none" stroke="url(#gaugeGradient)" stroke-width="12" stroke-linecap="round" class="gauge-ring" /> <defs>
+         <lineargradient id="gaugeGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+          <stop offset="0%" stop-color="#22c55e" />
+          <stop offset="50%" stop-color="#3b82f6" />
+          <stop offset="100%" stop-color="#06b6d4" />
+         </lineargradient>
+        </defs>
+       </svg>
+       <div class="absolute inset-0 flex flex-col items-center justify-center"><span id="quality-score" class="text-5xl font-bold">87</span> <span class="text-slate-400 text-sm">Quality Score</span>
+       </div>
+      </div>
+      <div class="flex-1 grid grid-cols-2 md:grid-cols-4 gap-4">
+       <div class="bg-slate-700/30 rounded-xl p-4 text-center">
+        <div class="text-3xl font-bold text-green-400" id="status-safe">
+         ✓
+        </div>
+        <div class="text-slate-400 text-sm mt-1">
+         Potable
+        </div>
+       </div>
+       <div class="bg-slate-700/30 rounded-xl p-4 text-center">
+        <div class="text-2xl font-bold text-blue-400" id="last-update">
+         Just Now
+        </div>
+        <div class="text-slate-400 text-sm mt-1">
+         Last Update
+        </div>
+       </div>
+       <div class="bg-slate-700/30 rounded-xl p-4 text-center">
+        <div class="text-2xl font-bold text-cyan-400" id="sample-count">
+         156
+        </div>
+        <div class="text-slate-400 text-sm mt-1">
+         Samples Today
+        </div>
+       </div>
+       <div class="bg-slate-700/30 rounded-xl p-4 text-center">
+        <div class="text-2xl font-bold text-purple-400" id="alerts-count">
+         0
+        </div>
+        <div class="text-slate-400 text-sm mt-1">
+         Alerts
+        </div>
+       </div>
+      </div>
+     </div>
+    </div><!-- Main Metrics Cards -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6"><!-- pH Value -->
+     <div class="bg-slate-800/50 rounded-2xl p-6 card-glow border border-slate-700/50 fade-in" style="animation-delay: 0.1s">
+      <div class="flex items-center justify-between mb-4">
+       <h3 class="text-lg font-semibold text-slate-200">pH Level</h3>
+       <div class="w-10 h-10 bg-purple-500/20 rounded-lg flex items-center justify-center"><span class="text-purple-400 text-lg font-bold">pH</span>
+       </div>
+      </div>
+      <div class="relative h-4 bg-gradient-to-r from-red-500 via-green-500 to-blue-500 rounded-full mb-3">
+       <div id="ph-indicator" class="absolute top-1/2 -translate-y-1/2 w-4 h-6 bg-white rounded-sm shadow-lg border-2 border-slate-800" style="left: 50%"></div>
+      </div>
+      <div class="flex justify-between text-xs text-slate-500 mb-4"><span>0 (Acidic)</span> <span>7 (Neutral)</span> <span>14 (Alkaline)</span>
+      </div>
+      <div class="flex items-end gap-2"><span id="ph-value" class="text-4xl font-bold text-purple-400">7.2</span> <span id="ph-status" class="text-green-400 text-sm mb-1">● Normal</span>
+      </div>
+      <p class="text-slate-500 text-sm mt-2">Ideal range: 6.5 - 8.5</p>
+     </div><!-- Turbidity -->
+     <div class="bg-slate-800/50 rounded-2xl p-6 card-glow border border-slate-700/50 fade-in" style="animation-delay: 0.2s">
+      <div class="flex items-center justify-between mb-4">
+       <h3 class="text-lg font-semibold text-slate-200">Turbidity</h3>
+       <div class="w-10 h-10 bg-amber-500/20 rounded-lg flex items-center justify-center">
+        <svg class="w-6 h-6 text-amber-400" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+        </svg>
+       </div>
+      </div>
+      <div class="relative mb-4">
+       <svg class="w-full h-32" viewbox="0 0 200 100"><defs>
+         <lineargradient id="turbidityGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+          <stop offset="0%" stop-color="#f59e0b" stop-opacity="0.3" />
+          <stop offset="100%" stop-color="#f59e0b" stop-opacity="0" />
+         </lineargradient>
+        </defs> <path id="turbidity-wave" d="M0,50 Q25,30 50,50 T100,50 T150,50 T200,50 V100 H0 Z" fill="url(#turbidityGrad)" class="chart-line" /> <path d="M0,50 Q25,30 50,50 T100,50 T150,50 T200,50" fill="none" stroke="#f59e0b" stroke-width="2" class="chart-line" />
+       </svg>
+      </div>
+      <div class="flex items-end gap-2"><span id="turbidity-value" class="text-4xl font-bold text-amber-400">2.3</span> <span class="text-slate-400 text-sm mb-1">NTU</span>
+      </div>
+      <div class="mt-2 h-2 bg-slate-700 rounded-full overflow-hidden">
+       <div id="turbidity-bar" class="h-full bg-gradient-to-r from-amber-500 to-amber-300 bar-animate origin-left" style="width: 23%"></div>
+      </div>
+      <p class="text-slate-500 text-sm mt-2">Max safe: 5 NTU</p>
+     </div><!-- TDS -->
+     <div class="bg-slate-800/50 rounded-2xl p-6 card-glow border border-slate-700/50 fade-in" style="animation-delay: 0.3s">
+      <div class="flex items-center justify-between mb-4">
+       <h3 class="text-lg font-semibold text-slate-200">TDS (Impurities)</h3>
+       <div class="w-10 h-10 bg-cyan-500/20 rounded-lg flex items-center justify-center">
+        <svg class="w-6 h-6 text-cyan-400" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+        </svg>
+       </div>
+      </div>
+      <div class="relative h-24 mb-4" id="tds-chart">
+       <svg class="w-full h-full" viewbox="0 0 200 80"><defs>
+         <lineargradient id="tdsGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+          <stop offset="0%" stop-color="#06b6d4" stop-opacity="0.4" />
+          <stop offset="100%" stop-color="#06b6d4" stop-opacity="0" />
+         </lineargradient>
+        </defs> <path d="M0,60 L20,55 L40,58 L60,45 L80,50 L100,40 L120,42 L140,35 L160,38 L180,30 L200,32 V80 H0 Z" fill="url(#tdsGrad)" /> <path d="M0,60 L20,55 L40,58 L60,45 L80,50 L100,40 L120,42 L140,35 L160,38 L180,30 L200,32" fill="none" stroke="#06b6d4" stroke-width="2" class="chart-line" /> <circle cx="200" cy="32" r="4" fill="#06b6d4" />
+       </svg>
+      </div>
+      <div class="flex items-end gap-2"><span id="tds-value" class="text-4xl font-bold text-cyan-400">245</span> <span class="text-slate-400 text-sm mb-1">ppm</span>
+      </div>
+      <div class="mt-2 flex gap-1">
+       <div class="flex-1 h-2 bg-green-500 rounded-l" title="Excellent: 0-50"></div>
+       <div class="flex-1 h-2 bg-blue-500" title="Good: 50-150"></div>
+       <div class="flex-1 h-2 bg-yellow-500" title="Fair: 150-300"></div>
+       <div class="flex-1 h-2 bg-orange-500" title="Poor: 300-500"></div>
+       <div class="flex-1 h-2 bg-red-500 rounded-r" title="Bad: 500+"></div>
+      </div>
+      <p class="text-slate-500 text-sm mt-2">Current: Fair (150-300 ppm)</p>
+     </div>
+    </div><!-- Substance Analysis -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6"><!-- Chlorine & Chemical Levels -->
+     <div class="bg-slate-800/50 rounded-2xl p-6 card-glow border border-slate-700/50 fade-in" style="animation-delay: 0.4s">
+      <h3 class="text-lg font-semibold text-slate-200 mb-6">Chemical Composition Analysis</h3>
+      <div class="space-y-5" id="chemical-bars"><!-- Chlorine -->
+       <div>
+        <div class="flex justify-between mb-2"><span class="text-slate-300 flex items-center gap-2"> <span class="w-3 h-3 rounded-full bg-green-500"></span> Chlorine (Cl₂) </span> <span class="text-green-400 font-semibold">0.8 mg/L <span class="text-slate-500 font-normal">(40%)</span></span>
+        </div>
+        <div class="h-3 bg-slate-700 rounded-full overflow-hidden">
+         <div class="h-full bg-gradient-to-r from-green-600 to-green-400 bar-animate origin-left" style="width: 40%"></div>
+        </div>
+        <div class="text-xs text-slate-500 mt-1">
+         Safe: 0.2 - 2.0 mg/L
+        </div>
+       </div><!-- Fluoride -->
+       <div>
+        <div class="flex justify-between mb-2"><span class="text-slate-300 flex items-center gap-2"> <span class="w-3 h-3 rounded-full bg-blue-500"></span> Fluoride (F⁻) </span> <span class="text-blue-400 font-semibold">0.7 mg/L <span class="text-slate-500 font-normal">(47%)</span></span>
+        </div>
+        <div class="h-3 bg-slate-700 rounded-full overflow-hidden">
+         <div class="h-full bg-gradient-to-r from-blue-600 to-blue-400 bar-animate origin-left" style="width: 47%; animation-delay: 0.1s"></div>
+        </div>
+        <div class="text-xs text-slate-500 mt-1">
+         Safe: 0 - 1.5 mg/L
+        </div>
+       </div><!-- Nitrate -->
+       <div>
+        <div class="flex justify-between mb-2"><span class="text-slate-300 flex items-center gap-2"> <span class="w-3 h-3 rounded-full bg-yellow-500"></span> Nitrate (NO₃⁻) </span> <span class="text-yellow-400 font-semibold">12 mg/L <span class="text-slate-500 font-normal">(24%)</span></span>
+        </div>
+        <div class="h-3 bg-slate-700 rounded-full overflow-hidden">
+         <div class="h-full bg-gradient-to-r from-yellow-600 to-yellow-400 bar-animate origin-left" style="width: 24%; animation-delay: 0.2s"></div>
+        </div>
+        <div class="text-xs text-slate-500 mt-1">
+         Safe: 0 - 50 mg/L
+        </div>
+       </div><!-- Lead -->
+       <div>
+        <div class="flex justify-between mb-2"><span class="text-slate-300 flex items-center gap-2"> <span class="w-3 h-3 rounded-full bg-red-500"></span> Lead (Pb) </span> <span class="text-green-400 font-semibold">0.002 mg/L <span class="text-slate-500 font-normal">(13%)</span></span>
+        </div>
+        <div class="h-3 bg-slate-700 rounded-full overflow-hidden">
+         <div class="h-full bg-gradient-to-r from-emerald-600 to-emerald-400 bar-animate origin-left" style="width: 13%; animation-delay: 0.3s"></div>
+        </div>
+        <div class="text-xs text-slate-500 mt-1">
+         Safe: 0 - 0.015 mg/L
+        </div>
+       </div><!-- Iron -->
+       <div>
+        <div class="flex justify-between mb-2"><span class="text-slate-300 flex items-center gap-2"> <span class="w-3 h-3 rounded-full bg-orange-500"></span> Iron (Fe) </span> <span class="text-orange-400 font-semibold">0.15 mg/L <span class="text-slate-500 font-normal">(50%)</span></span>
+        </div>
+        <div class="h-3 bg-slate-700 rounded-full overflow-hidden">
+         <div class="h-full bg-gradient-to-r from-orange-600 to-orange-400 bar-animate origin-left" style="width: 50%; animation-delay: 0.4s"></div>
+        </div>
+        <div class="text-xs text-slate-500 mt-1">
+         Safe: 0 - 0.3 mg/L
+        </div>
+       </div>
+      </div>
+     </div><!-- Mineral Composition Pie Chart -->
+     <div class="bg-slate-800/50 rounded-2xl p-6 card-glow border border-slate-700/50 fade-in" style="animation-delay: 0.5s">
+      <h3 class="text-lg font-semibold text-slate-200 mb-6">Mineral Composition</h3>
+      <div class="flex items-center gap-8">
+       <div class="relative">
+        <svg class="w-48 h-48" viewbox="0 0 100 100"><circle cx="50" cy="50" r="40" fill="none" stroke="#334155" stroke-width="20" /> <!-- Calcium - 35% --> <circle cx="50" cy="50" r="40" fill="none" stroke="#22c55e" stroke-width="20" stroke-dasharray="87.96 251.33" stroke-dashoffset="0" class="chart-line" /> <!-- Magnesium - 25% --> <circle cx="50" cy="50" r="40" fill="none" stroke="#3b82f6" stroke-width="20" stroke-dasharray="62.83 251.33" stroke-dashoffset="-87.96" class="chart-line" style="animation-delay: 0.2s" /> <!-- Sodium - 20% --> <circle cx="50" cy="50" r="40" fill="none" stroke="#f59e0b" stroke-width="20" stroke-dasharray="50.27 251.33" stroke-dashoffset="-150.79" class="chart-line" style="animation-delay: 0.4s" /> <!-- Potassium - 15% --> <circle cx="50" cy="50" r="40" fill="none" stroke="#8b5cf6" stroke-width="20" stroke-dasharray="37.70 251.33" stroke-dashoffset="-201.06" class="chart-line" style="animation-delay: 0.6s" /> <!-- Other - 5% --> <circle cx="50" cy="50" r="40" fill="none" stroke="#ec4899" stroke-width="20" stroke-dasharray="12.57 251.33" stroke-dashoffset="-238.76" class="chart-line" style="animation-delay: 0.8s" />
+        </svg>
+        <div class="absolute inset-0 flex items-center justify-center"><span class="text-2xl font-bold text-slate-200">100%</span>
+        </div>
+       </div>
+       <div class="space-y-3">
+        <div class="flex items-center gap-3">
+         <div class="w-4 h-4 rounded bg-green-500"></div><span class="text-slate-300">Calcium (Ca²⁺)</span> <span class="text-slate-400 ml-auto">35%</span>
+        </div>
+        <div class="flex items-center gap-3">
+         <div class="w-4 h-4 rounded bg-blue-500"></div><span class="text-slate-300">Magnesium (Mg²⁺)</span> <span class="text-slate-400 ml-auto">25%</span>
+        </div>
+        <div class="flex items-center gap-3">
+         <div class="w-4 h-4 rounded bg-amber-500"></div><span class="text-slate-300">Sodium (Na⁺)</span> <span class="text-slate-400 ml-auto">20%</span>
+        </div>
+        <div class="flex items-center gap-3">
+         <div class="w-4 h-4 rounded bg-purple-500"></div><span class="text-slate-300">Potassium (K⁺)</span> <span class="text-slate-400 ml-auto">15%</span>
+        </div>
+        <div class="flex items-center gap-3">
+         <div class="w-4 h-4 rounded bg-pink-500"></div><span class="text-slate-300">Other</span> <span class="text-slate-400 ml-auto">5%</span>
+        </div>
+       </div>
+      </div>
+     </div>
+    </div><!-- Historical Trends -->
+    <div class="bg-slate-800/50 rounded-2xl p-6 card-glow border border-slate-700/50 fade-in" style="animation-delay: 0.6s">
+     <div class="flex items-center justify-between mb-6">
+      <h3 class="text-lg font-semibold text-slate-200">24-Hour Trends</h3>
+      <div class="flex gap-2"><button onclick="setTimeRange('6h')" class="time-btn px-3 py-1 rounded-lg text-sm bg-slate-700 text-slate-300 hover:bg-slate-600 transition-all">6H</button> <button onclick="setTimeRange('12h')" class="time-btn px-3 py-1 rounded-lg text-sm bg-slate-700 text-slate-300 hover:bg-slate-600 transition-all">12H</button> <button onclick="setTimeRange('24h')" class="time-btn px-3 py-1 rounded-lg text-sm bg-blue-600 text-white transition-all">24H</button> <button onclick="setTimeRange('7d')" class="time-btn px-3 py-1 rounded-lg text-sm bg-slate-700 text-slate-300 hover:bg-slate-600 transition-all">7D</button>
+      </div>
+     </div>
+     <div class="relative h-64" id="trend-chart">
+      <svg class="w-full h-full" viewbox="0 0 800 200" preserveaspectratio="none"><!-- Grid lines --> <g stroke="#334155" stroke-width="1">
+        <line x1="0" y1="50" x2="800" y2="50" stroke-dasharray="4" />
+        <line x1="0" y1="100" x2="800" y2="100" stroke-dasharray="4" />
+        <line x1="0" y1="150" x2="800" y2="150" stroke-dasharray="4" />
+       </g> <!-- pH Line --> <defs>
+        <lineargradient id="phLineGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+         <stop offset="0%" stop-color="#a855f7" stop-opacity="0.3" />
+         <stop offset="100%" stop-color="#a855f7" stop-opacity="0" />
+        </lineargradient>
+       </defs> <path d="M0,100 Q100,90 200,95 T400,85 T600,90 T800,80 V200 H0 Z" fill="url(#phLineGrad)" /> <path d="M0,100 Q100,90 200,95 T400,85 T600,90 T800,80" fill="none" stroke="#a855f7" stroke-width="3" class="chart-line" /> <!-- TDS Line --> <defs>
+        <lineargradient id="tdsLineGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+         <stop offset="0%" stop-color="#06b6d4" stop-opacity="0.3" />
+         <stop offset="100%" stop-color="#06b6d4" stop-opacity="0" />
+        </lineargradient>
+       </defs> <path d="M0,120 Q100,130 200,125 T400,115 T600,120 T800,110 V200 H0 Z" fill="url(#tdsLineGrad)" /> <path d="M0,120 Q100,130 200,125 T400,115 T600,120 T800,110" fill="none" stroke="#06b6d4" stroke-width="3" class="chart-line" style="animation-delay: 0.3s" /> <!-- Turbidity Line --> <defs>
+        <lineargradient id="turbLineGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+         <stop offset="0%" stop-color="#f59e0b" stop-opacity="0.3" />
+         <stop offset="100%" stop-color="#f59e0b" stop-opacity="0" />
+        </lineargradient>
+       </defs> <path d="M0,140 Q100,145 200,135 T400,145 T600,140 T800,135 V200 H0 Z" fill="url(#turbLineGrad)" /> <path d="M0,140 Q100,145 200,135 T400,145 T600,140 T800,135" fill="none" stroke="#f59e0b" stroke-width="3" class="chart-line" style="animation-delay: 0.6s" />
+      </svg><!-- Time labels -->
+      <div class="absolute bottom-0 left-0 right-0 flex justify-between text-xs text-slate-500 pt-2"><span>00:00</span> <span>04:00</span> <span>08:00</span> <span>12:00</span> <span>16:00</span> <span>20:00</span> <span>Now</span>
+      </div>
+     </div>
+     <div class="flex justify-center gap-6 mt-4">
+      <div class="flex items-center gap-2">
+       <div class="w-3 h-3 rounded-full bg-purple-500"></div><span class="text-slate-400 text-sm">pH Level</span>
+      </div>
+      <div class="flex items-center gap-2">
+       <div class="w-3 h-3 rounded-full bg-cyan-500"></div><span class="text-slate-400 text-sm">TDS (ppm)</span>
+      </div>
+      <div class="flex items-center gap-2">
+       <div class="w-3 h-3 rounded-full bg-amber-500"></div><span class="text-slate-400 text-sm">Turbidity (NTU)</span>
+      </div>
+     </div>
+    </div><!-- Alerts & ESP32 Code Section -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6"><!-- Recent Alerts -->
+     <div class="bg-slate-800/50 rounded-2xl p-6 card-glow border border-slate-700/50 fade-in" style="animation-delay: 0.7s">
+      <h3 class="text-lg font-semibold text-slate-200 mb-4">Recent Alerts</h3>
+      <div class="space-y-3" id="alerts-list">
+       <div class="flex items-center gap-3 p-3 bg-green-500/10 border border-green-500/30 rounded-xl">
+        <div class="w-10 h-10 bg-green-500/20 rounded-lg flex items-center justify-center">
+         <svg class="w-5 h-5 text-green-400" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+         </svg>
+        </div>
+        <div class="flex-1">
+         <p class="text-slate-200 font-medium">All parameters normal</p>
+         <p class="text-slate-500 text-sm">Water quality is within safe limits</p>
+        </div><span class="text-slate-500 text-sm">2m ago</span>
+       </div>
+       <div class="flex items-center gap-3 p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-xl">
+        <div class="w-10 h-10 bg-yellow-500/20 rounded-lg flex items-center justify-center">
+         <svg class="w-5 h-5 text-yellow-400" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+         </svg>
+        </div>
+        <div class="flex-1">
+         <p class="text-slate-200 font-medium">TDS slightly elevated</p>
+         <p class="text-slate-500 text-sm">TDS reached 280 ppm (Fair range)</p>
+        </div><span class="text-slate-500 text-sm">1h ago</span>
+       </div>
+       <div class="flex items-center gap-3 p-3 bg-blue-500/10 border border-blue-500/30 rounded-xl">
+        <div class="w-10 h-10 bg-blue-500/20 rounded-lg flex items-center justify-center">
+         <svg class="w-5 h-5 text-blue-400" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+         </svg>
+        </div>
+        <div class="flex-1">
+         <p class="text-slate-200 font-medium">Sensor calibration reminder</p>
+         <p class="text-slate-500 text-sm">pH sensor due for calibration</p>
+        </div><span class="text-slate-500 text-sm">6h ago</span>
+       </div>
+      </div>
+     </div><!-- ESP32 Integration Guide -->
+     <div class="bg-slate-800/50 rounded-2xl p-6 card-glow border border-slate-700/50 fade-in" style="animation-delay: 0.8s">
+      <h3 class="text-lg font-semibold text-slate-200 mb-4">ESP32 Integration</h3>
+      <div class="bg-slate-900 rounded-xl p-4 overflow-x-auto">
+       <pre class="text-sm text-slate-300"><code class="language-cpp"><span class="text-purple-400">// ESP32 Sensor Endpoints</span>
+<span class="text-green-400">GET</span> /api/sensors
+<span class="text-green-400">POST</span> /api/update
+
+<span class="text-purple-400">// JSON Response Format:</span>
+{
+  <span class="text-cyan-400">"ph"</span>: <span class="text-amber-400">7.2</span>,
+  <span class="text-cyan-400">"turbidity"</span>: <span class="text-amber-400">2.3</span>,
+  <span class="text-cyan-400">"tds"</span>: <span class="text-amber-400">245</span>,
+  <span class="text-cyan-400">"chlorine"</span>: <span class="text-amber-400">0.8</span>,
+  <span class="text-cyan-400">"temp"</span>: <span class="text-amber-400">25.5</span>
+}</code></pre>
+      </div>
+      <div class="mt-4 flex gap-3"><button onclick="showESPCode()" class="flex-1 bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded-lg text-sm font-medium transition-all"> View Full Code </button> <button onclick="testConnection()" class="flex-1 bg-slate-700 hover:bg-slate-600 px-4 py-2 rounded-lg text-sm font-medium transition-all"> Test Connection </button>
+      </div>
+     </div>
+    </div>
+   </main><!-- Footer -->
+   <footer class="bg-slate-800/30 border-t border-slate-700/50 mt-8 py-4">
+    <div class="max-w-7xl mx-auto px-4 text-center text-slate-500 text-sm">
+     ESP32 Water Quality Monitoring System • Real-time Analysis Dashboard
+    </div>
+   </footer><!-- ESP32 Code Modal -->
+   <div id="esp-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 hidden items-center justify-center p-4">
+    <div class="bg-slate-800 rounded-2xl max-w-3xl w-full max-h-[80%] overflow-hidden">
+     <div class="p-4 border-b border-slate-700 flex items-center justify-between">
+      <h3 class="text-lg font-semibold text-slate-200">ESP32 Arduino Code</h3><button onclick="closeESPModal()" class="text-slate-400 hover:text-white">
+       <svg class="w-6 h-6" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+       </svg></button>
+     </div>
+     <div class="p-4 overflow-y-auto max-h-[60vh]">
+      <pre class="text-sm text-slate-300 bg-slate-900 p-4 rounded-xl overflow-x-auto"><code>#include &lt;WiFi.h&gt;
+#include &lt;WebServer.h&gt;
+#include &lt;ArduinoJson.h&gt;
+
+// WiFi credentials
+const char* ssid = "YOUR_SSID";
+const char* password = "YOUR_PASSWORD";
+
+// Sensor pins
+#define PH_PIN 34
+#define TURBIDITY_PIN 35
+#define TDS_PIN 32
+
+WebServer server(80);
+
+// Sensor variables
+float phValue = 0;
+float turbidity = 0;
+float tdsValue = 0;
+float chlorine = 0;
+float temperature = 25.0;
+
+void setup() {
+  Serial.begin(115200);
+  
+  // Connect to WiFi
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(1000);
+    Serial.println("Connecting...");
+  }
+  Serial.println(WiFi.localIP());
+  
+  // Setup routes
+  server.on("/api/sensors", handleSensors);
+  server.on("/", handleRoot);
+  
+  // Enable CORS
+  server.enableCORS(true);
+  server.begin();
+}
+
+void loop() {
+  server.handleClient();
+  readSensors();
+  delay(100);
+}
+
+void readSensors() {
+  // Read pH sensor
+  int phRaw = analogRead(PH_PIN);
+  phValue = map(phRaw, 0, 4095, 0, 14);
+  
+  // Read turbidity sensor
+  int turbRaw = analogRead(TURBIDITY_PIN);
+  turbidity = map(turbRaw, 0, 4095, 0, 100) / 10.0;
+  
+  // Read TDS sensor
+  int tdsRaw = analogRead(TDS_PIN);
+  tdsValue = map(tdsRaw, 0, 4095, 0, 1000);
+}
+
+void handleSensors() {
+  StaticJsonDocument&lt;256&gt; doc;
+  doc["ph"] = phValue;
+  doc["turbidity"] = turbidity;
+  doc["tds"] = tdsValue;
+  doc["chlorine"] = chlorine;
+  doc["temp"] = temperature;
+  doc["timestamp"] = millis();
+  
+  String response;
+  serializeJson(doc, response);
+  server.send(200, "application/json", response);
+}
+
+void handleRoot() {
+  // Serve the HTML dashboard
+  server.send(200, "text/html", dashboardHTML);
+}</code></pre>
+     </div>
+     <div class="p-4 border-t border-slate-700"><button onclick="copyCode()" class="w-full bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded-lg text-sm font-medium transition-all"> Copy Code </button>
+     </div>
+    </div>
+   </div>
+  </div>
+  <script>
+    // Default configuration
+    const defaultConfig = {
+      dashboard_title: 'Water Quality Monitor',
+      location_name: 'Main Water Tank',
+      primary_color: '#0f172a',
+      secondary_color: '#1e293b',
+      text_color: '#f1f5f9',
+      accent_color: '#3b82f6',
+      highlight_color: '#06b6d4'
+    };
+
+    // Simulated sensor data
+    let sensorData = {
+      ph: 7.2,
+      turbidity: 2.3,
+      tds: 245,
+      chlorine: 0.8,
+      temperature: 25.5,
+      quality: 87
+    };
+
+    // Initialize Element SDK
+    if (window.elementSdk) {
+      window.elementSdk.init({
+        defaultConfig,
+        onConfigChange: async (config) => {
+          document.getElementById('dashboard-title').textContent = config.dashboard_title || defaultConfig.dashboard_title;
+          document.getElementById('location-name').textContent = config.location_name || defaultConfig.location_name;
+          
+          // Apply colors
+          document.body.style.background = config.primary_color || defaultConfig.primary_color;
+        },
+        mapToCapabilities: (config) => ({
+          recolorables: [
+            {
+              get: () => config.primary_color || defaultConfig.primary_color,
+              set: (value) => { config.primary_color = value; window.elementSdk.setConfig({ primary_color: value }); }
+            },
+            {
+              get: () => config.secondary_color || defaultConfig.secondary_color,
+              set: (value) => { config.secondary_color = value; window.elementSdk.setConfig({ secondary_color: value }); }
+            },
+            {
+              get: () => config.text_color || defaultConfig.text_color,
+              set: (value) => { config.text_color = value; window.elementSdk.setConfig({ text_color: value }); }
+            },
+            {
+              get: () => config.accent_color || defaultConfig.accent_color,
+              set: (value) => { config.accent_color = value; window.elementSdk.setConfig({ accent_color: value }); }
+            },
+            {
+              get: () => config.highlight_color || defaultConfig.highlight_color,
+              set: (value) => { config.highlight_color = value; window.elementSdk.setConfig({ highlight_color: value }); }
+            }
+          ],
+          borderables: [],
+          fontEditable: undefined,
+          fontSizeable: undefined
+        }),
+        mapToEditPanelValues: (config) => new Map([
+          ['dashboard_title', config.dashboard_title || defaultConfig.dashboard_title],
+          ['location_name', config.location_name || defaultConfig.location_name]
+        ])
+      });
+    }
+
+    // Update quality gauge
+    function updateQualityGauge(score) {
+      const gauge = document.getElementById('quality-gauge');
+      const circumference = 2 * Math.PI * 85;
+      const offset = circumference - (score / 100) * circumference;
+      gauge.style.strokeDashoffset = offset;
+      document.getElementById('quality-score').textContent = score;
+    }
+
+    // Update pH indicator
+    function updatePHIndicator(ph) {
+      const indicator = document.getElementById('ph-indicator');
+      const position = (ph / 14) * 100;
+      indicator.style.left = `calc(${position}% - 8px)`;
+      document.getElementById('ph-value').textContent = ph.toFixed(1);
+      
+      const status = document.getElementById('ph-status');
+      if (ph >= 6.5 && ph <= 8.5) {
+        status.innerHTML = '● Normal';
+        status.className = 'text-green-400 text-sm mb-1';
+      } else if (ph >= 5 && ph <= 9) {
+        status.innerHTML = '● Caution';
+        status.className = 'text-yellow-400 text-sm mb-1';
+      } else {
+        status.innerHTML = '● Warning';
+        status.className = 'text-red-400 text-sm mb-1';
+      }
+    }
+
+    // Refresh data with simulation
+    function refreshData() {
+      // Simulate sensor readings with slight variations
+      sensorData.ph = 6.5 + Math.random() * 2;
+      sensorData.turbidity = 1 + Math.random() * 4;
+      sensorData.tds = 150 + Math.random() * 200;
+      sensorData.chlorine = 0.2 + Math.random() * 1.5;
+      sensorData.quality = Math.min(100, Math.max(0, 85 + Math.random() * 10));
+
+      // Update UI
+      updateQualityGauge(Math.round(sensorData.quality));
+      updatePHIndicator(sensorData.ph);
+      document.getElementById('turbidity-value').textContent = sensorData.turbidity.toFixed(1);
+      document.getElementById('turbidity-bar').style.width = `${(sensorData.turbidity / 10) * 100}%`;
+      document.getElementById('tds-value').textContent = Math.round(sensorData.tds);
+      document.getElementById('last-update').textContent = 'Just Now';
+
+      // Show refresh animation
+      document.querySelectorAll('.card-glow').forEach(card => {
+        card.style.animation = 'none';
+        card.offsetHeight;
+        card.style.animation = 'fadeIn 0.5s ease-out forwards';
+      });
+    }
+
+    // Time range selection
+    function setTimeRange(range) {
+      document.querySelectorAll('.time-btn').forEach(btn => {
+        btn.classList.remove('bg-blue-600', 'text-white');
+        btn.classList.add('bg-slate-700', 'text-slate-300');
+      });
+      event.target.classList.remove('bg-slate-700', 'text-slate-300');
+      event.target.classList.add('bg-blue-600', 'text-white');
+    }
+
+    // Show ESP32 code modal
+    function showESPCode() {
+      document.getElementById('esp-modal').classList.remove('hidden');
+      document.getElementById('esp-modal').classList.add('flex');
+    }
+
+    // Close ESP32 modal
+    function closeESPModal() {
+      document.getElementById('esp-modal').classList.add('hidden');
+      document.getElementById('esp-modal').classList.remove('flex');
+    }
+
+    // Copy code to clipboard
+    function copyCode() {
+      const code = document.querySelector('#esp-modal pre code').textContent;
+      navigator.clipboard.writeText(code).then(() => {
+        const btn = document.querySelector('#esp-modal button:last-child');
+        const originalText = btn.textContent;
+        btn.textContent = 'Copied!';
+        btn.classList.add('bg-green-600');
+        setTimeout(() => {
+          btn.textContent = originalText;
+          btn.classList.remove('bg-green-600');
+        }, 2000);
+      });
+    }
+
+    // Test connection simulation
+    function testConnection() {
+      const btn = event.target;
+      const originalText = btn.textContent;
+      btn.textContent = 'Testing...';
+      btn.disabled = true;
+      
+      setTimeout(() => {
+        btn.textContent = 'Connected ✓';
+        btn.classList.add('bg-green-600');
+        setTimeout(() => {
+          btn.textContent = originalText;
+          btn.classList.remove('bg-green-600');
+          btn.disabled = false;
+        }, 2000);
+      }, 1500);
+    }
+
+    // Initialize on load
+    document.addEventListener('DOMContentLoaded', () => {
+      updateQualityGauge(sensorData.quality);
+      updatePHIndicator(sensorData.ph);
+      
+      // Simulate periodic updates
+      setInterval(() => {
+        sensorData.ph += (Math.random() - 0.5) * 0.1;
+        sensorData.ph = Math.max(6, Math.min(9, sensorData.ph));
+        updatePHIndicator(sensorData.ph);
+      }, 5000);
+    });
+  </script>
+ <script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'9d448c5422ba8117',t:'MTc3MjE2MjQ0NS4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</html>
